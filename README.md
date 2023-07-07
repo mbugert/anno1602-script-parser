@@ -11,8 +11,8 @@ For more details on the script language format, see https://github.com/Green-Sky
 ## Usage
 Needs python>=3.9.
 ```bash
-git clone TODO
-cd TODO
+git clone https://github.com/mbugert/anno1602-script-parser
+cd anno1602-script-parser
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
