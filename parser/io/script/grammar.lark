@@ -1,0 +1,93 @@
+// LALR-compatible grammar for Anno 1602 script files.
+
+// see https://github.com/lark-parser/lark/blob/master/lark/grammars/common.lark
+%import common (WS, INT, DIGIT, NUMBER, UCASE_LETTER, LCASE_LETTER)
+%ignore WS
+
+// -------------------- RULES --------------------
+
+start : include_expr* (def_object | def_var | def_property)*
+
+include_expr: "Include" _COLON _DOUBLE_QUOTE FILENAME _DOUBLE_QUOTE
+
+def_object : "Objekt" _COLON OBJECT_IDENT (numbered_object+ | object_content) "EndObj;"
+object_content : (def_object | def_property)+
+
+// objects contain arrays of sub-objects (?) that are numbered using the
+// special "Nummer" property
+numbered_object : def_var* def_number (def_var | object_content | fill_expr)+
+?def_number : def_number_absolute | def_number_relative
+def_number_absolute : NUMMER _COLON arith_expr
+// we permit a non-signed literal as an exception here, because in HAEUSER.COD,
+// the first time "Nummer" is referenced, it's via "@Nummer: 0"
+def_number_relative : NUMMER_RELATIVE _COLON (unary_arith_expr | int_literal)
+
+// property expressions add a key-value pair to an object
+?def_property : def_property_absolute | def_property_relative
+// example: `Rotate: 4`
+def_property_absolute : PROPERTY_IDENT _COLON property_value
+// recall most recent value of a property, modify it by some delta, and add it
+// to the current object
+// examples: `@Gfx: +5`, `@Pos: +79, +0`
+def_property_relative : _AT PROPERTY_IDENT _COLON property_value
+// property values can be list-typed
+property_value : arith_expr (_COMMA arith_expr)*
+
+// variable definitions outside or inside of objects
+?def_var : def_var_absolute | def_var_relative
+// `IDBODEN = 20101`
+def_var_absolute : VAR_IDENT _EQUALS arith_expr
+// example: `@GFXNR = +80`
+def_var_relative : _AT VAR_IDENT _EQUALS unary_arith_expr
+
+// "ObjFill" fills array object with properties from another array object.
+// There are two flavors for this: forward and backward filling. Forward
+// filling specifies default properties for objects defined later, and uses
+// the syntax `ObjFill: 0,MAXGADGET`. Backward filling adds properties from a
+// previously specified array object, and uses syntax `ObjFill: BASE`.
+fill_expr : "ObjFill" _COLON literal_or_ref (_COMMA "MAX" OBJECT_IDENT)?
+
+?arith_expr : literal_or_ref | unary_arith_expr | binary_arith_expr
+unary_arith_expr : (PLUS | MINUS) literal
+binary_arith_expr : literal_or_ref (PLUS | MINUS) literal_or_ref
+?literal_or_ref : literal | var_ref | property_ref | property_index_ref
+literal: NUMBER
+int_literal: INT
+var_ref : VAR_IDENT
+property_ref : NUMMER | PROPERTY_IDENT
+// example: `Posoffs: 32-Pos[0], 213-Pos[1]`
+property_index_ref : PROPERTY_IDENT "[" int_literal "]"
+
+// -------------------- TERMINALS --------------------
+
+// Generally, variable identifiers are UPPER_CASE_STRINGS_123, and properties
+// are TitleCaseStrings. There are exceptions to this though, which make
+// parsing more difficult for no good reason:
+// - we need to exclude special properties and keywords (that's fine)
+// - there is one variable identifier in HAEUSER.COD called "pMAUER"
+// - there is a property called "BGruppe"
+// - single-letter uppercase identifiers exist, which should be variables
+VAR_IDENT : /(?!(Nummer|ObjFill|Include|EndObj))/ "p"? UCASE_LETTER (UCASE_LETTER | DIGIT | "_")*
+PROPERTY_IDENT : /(?!(Nummer|ObjFill|Include|EndObj))/ UCASE_LETTER UCASE_LETTER? (LCASE_LETTER+ UCASE_LETTER?)+
+OBJECT_IDENT : UCASE_LETTER (UCASE_LETTER | DIGIT | "_")*
+FILENAME : (UCASE_LETTER | LCASE_LETTER | "_" | ".")+
+
+// If "@" and "Nummer" are left as separate terminals, LALR gets stuck when
+// parsing "@Nummer" after reading the "@", because it expects a var or
+// property definition that belongs to the previous numbered object. Pulling
+// "@" into the terminal fixes that.
+NUMMER : "Nummer"
+NUMMER_RELATIVE : "@Nummer"
+
+PLUS : "+"
+MINUS : "-"
+
+// filter out terminals without semantics by prefixing them with _
+_DOUBLE_QUOTE : "\""
+_EQUALS : "="
+_COLON : ":"
+_COMMA : ","
+_AT : "@"
+
+COMMENT: /;.*\n/
+%ignore COMMENT
